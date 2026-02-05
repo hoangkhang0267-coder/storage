@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Detail</title>
+  <link rel="stylesheet" href="style.css">
+
+</head>
+<body>
+
+<div class="detail-container">
+  <div class="detail-main">
+    <img id="mainImg">
+    <div>
+      <h2 id="title"></h2>
+      <p id="description"></p>
+
+      <h3>Upload ảnh chi tiết</h3>
+      <input type="file" id="fileInput" multiple>
+      <button id="uploadBtn">Upload</button>
+    </div>
+  </div>
+
+  <div class="gallery" id="gallery"></div>
+</div>
+
+<div class="lightbox" id="lightbox">
+  <img id="lightboxImg">
+</div>
+
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+const supabase = createClient(
+  SUPABASE_URL, SUPABASE_ANON_KEY
+);
+
+const itemId = new URLSearchParams(location.search).get("id");
+
+// load item
+const { data: item } = await supabase
+  .from("items")
+  .select("*")
+  .eq("id", itemId)
+  .single();
+
+title.innerText = item.title;
+description.innerText = item.description;
+mainImg.src = item.thumbnail_url;
+
+// load images
+async function loadImages() {
+  gallery.innerHTML = "";
+
+  const { data, error } = await supabase
+    .from("images")
+    .select("*")
+    .eq("item_id", itemId);
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  for (const imgData of data) {
+    const img = document.createElement("img");
+    img.src = imgData.image_url;
+    img.width = 200;
+    img.style.borderRadius = "10px";
+    img.style.cursor = "zoom-in";
+
+    // 🔥 ẢNH LỖI → XÓA UI + DB
+    img.onerror = async () => {
+      console.warn("Ảnh chết:", imgData.image_url);
+
+      // xóa record DB
+      await supabase
+        .from("images")
+        .delete()
+        .eq("id", imgData.id);
+
+      img.remove();
+    };
+
+    // click phóng to
+    img.onclick = () => {
+      lightbox.style.display = "flex";
+      lightboxImg.src = img.src;
+    };
+
+    gallery.appendChild(img);
+  }
+}
+
+loadImages();
+
+// upload
+uploadBtn.onclick = async () => {
+  if (!fileInput.files.length) return alert("Chưa chọn ảnh");
+
+  for (const file of fileInput.files) {
+    const path = `gallery/${itemId}/${Date.now()}_${file.name}`;
+
+    const { error } = await supabase
+      .storage
+      .from("images")
+      .upload(path, file);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    const { data } =
+      supabase.storage.from("images").getPublicUrl(path);
+
+    await supabase.from("images").insert({
+      item_id: itemId,
+      image_url: data.publicUrl
+    });
+  }
+
+  loadImages();
+};
+
+// lightbox
+gallery.onclick = e => {
+  if (e.target.tagName === "IMG") {
+    lightbox.style.display = "flex";
+    lightboxImg.src = e.target.src;
+  }
+};
+
+lightbox.onclick = () => {
+  lightbox.style.display = "none";
+};
+
+</script>
+
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Index</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="header">
+  <h1>Tạo nội dung</h1>
+
+  <input id="titleInput" placeholder="Tiêu đề">
+  <textarea id="descInput" placeholder="Mô tả"></textarea>
+
+  <input type="file" id="thumbInput" accept="image/*">
+  <img id="thumbPreview" width="160">
+
+  <br><br>
+  <button id="createBtn">Tạo nội dung</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
+
+const supabase = createClient(
+  SUPABASE_URL, SUPABASE_ANON_KEY
+);
+
+const grid = document.getElementById("grid");
+
+/* ================= PREVIEW ================= */
+thumbInput.onchange = e => {
+  thumbPreview.src = URL.createObjectURL(e.target.files[0]);
+};
+
+/* ================= CREATE ITEM ================= */
+createBtn.onclick = async () => {
+  const file = thumbInput.files[0];
+  if (!file) return alert("Chọn thumbnail");
+
+  const path = `thumbs/${Date.now()}_${file.name}`;
+
+  const { error: upErr } =
+    await supabase.storage.from("thumbnails").upload(path, file);
+
+  if (upErr) return alert(upErr.message);
+
+  const { data } =
+    supabase.storage.from("thumbnails").getPublicUrl(path);
+
+  const { error } = await supabase.from("items").insert({
+    title: titleInput.value,
+    description: descInput.value,
+    thumbnail_url: data.publicUrl
+  });
+
+  if (error) return alert(error.message);
+
+  location.reload();
+};
+
+/* ================= LOAD ITEMS ================= */
+async function loadItems() {
+  const { data, error } = await supabase.from("items").select("*");
+  if (error) return alert(error.message);
+
+  grid.innerHTML = "";
+
+  data.forEach(i => {
+    grid.innerHTML += `
+      <div class="card" id="item-${i.id}">
+        <img src="${i.thumbnail_url}">
+        <div class="content">
+          <h3>${i.title}</h3>
+          <p>${i.description}</p>
+
+          <a href="detail.html?id=${i.id}">Xem chi tiết →</a>
+          <br><br>
+
+          <button onclick="deleteItem('${i.id}', '${i.thumbnail_url}')">
+            Xóa
+          </button>
+        </div>
+      </div>
+    `;
+  });
+}
+
+loadItems();
+
+/* ================= DELETE ITEM (FULL) ================= */
+window.deleteItem = async (itemId, thumbUrl) => {
+  if (!confirm("Xóa nội dung này vĩnh viễn?")) return;
+
+  /* 1️⃣ LẤY ẢNH DETAIL */
+  const { data: images } = await supabase
+    .from("images")
+    .select("image_url")
+    .eq("item_id", itemId);
+
+  /* 2️⃣ XÓA ẢNH DETAIL TRONG STORAGE */
+  if (images && images.length) {
+    const paths = images.map(img =>
+      img.image_url.split("/storage/v1/object/public/images/")[1]
+    );
+
+    await supabase.storage.from("images").remove(paths);
+  }
+
+  /* 3️⃣ XÓA THUMBNAIL */
+  const thumbPath =
+    thumbUrl.split("/storage/v1/object/public/thumbnails/")[1];
+
+  await supabase.storage.from("thumbnails").remove([thumbPath]);
+
+  /* 4️⃣ XÓA DB */
+  await supabase.from("images").delete().eq("item_id", itemId);
+  await supabase.from("items").delete().eq("id", itemId);
+
+  /* 5️⃣ XÓA TAB TRÊN WEB */
+  document.getElementById(`item-${itemId}`).remove();
+};
+</script>
+
+</body>
+</html>
